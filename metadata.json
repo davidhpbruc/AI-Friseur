@@ -1,0 +1,8 @@
+{
+  "name": "AI Friseur",
+  "description": "An AI-powered application to visualize new hairstyles. Users can take photos, describe a style, and see a realistic preview of their new look.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
