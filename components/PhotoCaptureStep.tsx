@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import CameraView from './CameraView';
 import BackArrowIcon from './icons/BackArrowIcon';
 import Spinner from './Spinner';
@@ -12,6 +12,8 @@ interface PhotoCaptureStepProps {
   onValidate: (photo: string, view: 'front' | 'side' | 'back') => Promise<{ isValid: boolean; issue: string; }>;
 }
 
+const MAX_ATTEMPTS = 3;
+
 const viewPrompts = {
   front: { title: 'Front View', description: 'Center your face in the guide. Ensure good lighting.' },
   side: { title: 'Angled View', description: 'Turn your head slightly to match the guide.' },
@@ -22,6 +24,14 @@ const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({ view, onConfirm, on
   const [photo, setPhoto] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState<boolean>(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [attemptCount, setAttemptCount] = useState<number>(1);
+
+  // Reset attempts when view changes
+  useEffect(() => {
+    setAttemptCount(1);
+    setPhoto(null);
+    setValidationError(null);
+  }, [view]);
 
   const handleCapture = async (imageDataUrl: string) => {
     setValidationError(null);
@@ -31,6 +41,9 @@ const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({ view, onConfirm, on
       const result = await onValidate(imageDataUrl, view);
       if (!result.isValid) {
         setValidationError(result.issue);
+        if (view !== 'front') {
+            setAttemptCount(prev => prev + 1);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -50,6 +63,9 @@ const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({ view, onConfirm, on
       onConfirm(photo);
     }
   };
+  
+  const isTrySystemActive = view !== 'front' && onSkip;
+  const hasExceededAttempts = isTrySystemActive && attemptCount > MAX_ATTEMPTS;
 
   const { title, description } = viewPrompts[view];
   const confirmText = view === 'back' ? 'Confirm & Continue' : 'Confirm & Next';
@@ -79,8 +95,18 @@ const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({ view, onConfirm, on
             )}
             {validationError && !isValidating && (
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center text-center p-8">
-                <h3 className="text-2xl font-bold text-red-500 mb-4">Photo Issue Detected</h3>
-                <p className="text-lg text-white">{validationError}</p>
+                {hasExceededAttempts ? (
+                    <>
+                        <h3 className="text-2xl font-bold text-yellow-400 mb-4">Let's Move On</h3>
+                        <p className="text-lg text-white">Don't worry about the angle. To ensure the best result, we'll continue with the photos we have.</p>
+                    </>
+                ) : (
+                    <>
+                        <h3 className="text-2xl font-bold text-red-500 mb-4">Photo Issue Detected</h3>
+                        <p className="text-lg text-white">{validationError}</p>
+                        {isTrySystemActive && <p className="text-base text-gray-300 mt-4 font-bold">Attempt {attemptCount} of {MAX_ATTEMPTS}</p>}
+                    </>
+                )}
               </div>
             )}
           </div>
@@ -100,9 +126,13 @@ const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({ view, onConfirm, on
 
       <footer className="p-4 flex justify-around items-center bg-gray-900 min-h-[84px]">
         {photo ? (
-            validationError ? (
+            (validationError && !hasExceededAttempts) ? (
                 <button onClick={handleRetake} className="w-full max-w-xs mx-auto py-3 bg-red-600 text-white font-bold rounded-full hover:bg-red-700">
                     Retake Photo
+                </button>
+            ) : (hasExceededAttempts && onSkip) ? (
+                 <button onClick={onSkip} className="w-full max-w-xs mx-auto py-3 bg-purple-600 text-white font-bold rounded-full hover:bg-purple-700">
+                    Continue
                 </button>
             ) : (
                 <>
@@ -111,7 +141,7 @@ const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({ view, onConfirm, on
                     </button>
                     <button
                         onClick={handleConfirm}
-                        disabled={isValidating}
+                        disabled={isValidating || !!validationError}
                         className="px-6 py-3 bg-purple-600 text-white font-semibold rounded-full disabled:bg-gray-500 disabled:cursor-wait"
                     >
                         {isValidating ? 'Analyzing...' : confirmText}

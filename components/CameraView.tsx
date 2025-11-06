@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import FlipCameraIcon from './icons/FlipCameraIcon';
 import CameraIcon from './icons/CameraIcon';
@@ -14,37 +15,34 @@ const CameraView: React.FC<CameraViewProps> = ({ onCapture, view }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>(view === 'back' ? 'environment' : 'user');
-  const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const startCamera = useCallback(async (mode: 'user' | 'environment') => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: mode }
-      });
-      setStream(newStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = newStream;
-      }
-      setError(null);
-    } catch (err) {
-      console.error("Error accessing camera:", err);
-      setError("Could not access the camera. Please check permissions.");
-    }
-  }, [stream]);
-  
   useEffect(() => {
-    startCamera(facingMode);
-    
+    let currentStream: MediaStream | null = null;
+
+    async function getCameraStream() {
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode },
+        });
+        currentStream = newStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = newStream;
+        }
+        setError(null);
+      } catch (err) {
+        console.error("Error accessing camera:", err);
+        setError("Could not access the camera. Please check permissions.");
+      }
+    }
+
+    getCameraStream();
+
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      if (currentStream) {
+        currentStream.getTracks().forEach((track) => track.stop());
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facingMode]);
 
   const handleCapture = () => {

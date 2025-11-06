@@ -11,13 +11,13 @@ import type { AppScreen, UserPhotos, StyleInput } from './types';
 import { MimeType } from './types';
 import { INITIAL_TAKES } from './constants';
 
-const GENERATION_TIMEOUT_MS = 30000; // 30 seconds
+const GENERATION_TIMEOUT_MS = 90000; // 90 seconds for sequential generation
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>('welcome');
   const [takes, setTakes] = useLocalStorage<number>('takes', INITIAL_TAKES);
   const [userPhotos, setUserPhotos] = useState<UserPhotos>({ front: null, side: null, back: null });
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [generationResults, setGenerationResults] = useState<{ original: string, generated: string }[]>([]);
   const [styleInput, setStyleInput] = useState<StyleInput>({ text: '', image: null });
   const [error, setError] = useState<string | null>(null);
   const [isDocsVisible, setIsDocsVisible] = useState(false);
@@ -26,7 +26,7 @@ export default function App() {
     // Pre-cache a clean state for when the user starts a new preview
     if (screen === 'welcome') {
       setUserPhotos({ front: null, side: null, back: null });
-      setGeneratedImages([]);
+      setGenerationResults([]);
       setStyleInput({ text: '', image: null });
       setError(null);
     }
@@ -63,33 +63,44 @@ export default function App() {
     if (userPhotos.front) photosToProcess.push({ view: 'front', photo: userPhotos.front });
     if (userPhotos.side) photosToProcess.push({ view: 'side', photo: userPhotos.side });
     if (userPhotos.back) photosToProcess.push({ view: 'back', photo: userPhotos.back });
-
-
+    
     try {
-      const generationPromises = photosToProcess.map(p => 
-          generateHairstyle(p.photo, p.view, input)
-      );
+      // Sequential generation process to ensure consistency
+      const generationProcess = async () => {
+        const results: { original: string, generated: string }[] = [];
+        const context: { front?: string; side?: string; } = {};
+        for (const p of photosToProcess) {
+            const image = await generateHairstyle(p.photo, p.view, input, context);
+            results.push({ original: p.photo, generated: image });
+            if (p.view === 'front') context.front = image;
+            if (p.view === 'side') context.side = image;
+        }
+        return results;
+      };
 
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('timeout')), GENERATION_TIMEOUT_MS)
       );
 
       const results = await Promise.race([
-        Promise.all(generationPromises),
+        generationProcess(),
         timeoutPromise
-      ]) as string[];
+      ]) as { original: string, generated: string }[];
       
-      setGeneratedImages(results);
+      setGenerationResults(results);
       setScreen('results');
     } catch (e: any) {
       console.error(e);
-      if (e.message === 'timeout') {
+       if (e.message === 'timeout') {
         setError('The request timed out as the AI is taking too long. Please try again later.');
+      } else if (e.message === 'SAFETY_VIOLATION') {
+        setError('Your description or reference photo might violate our content policy. Please modify your request and try again.');
       } else {
-        setError('An error occurred while generating your preview. Please try again.');
+        setError('An error occurred generating your preview. Please try rephrasing your description or using a different reference photo.');
       }
       setScreen('describe'); // Go back to the describe screen on error
       setTakes(prev => prev + 1); // Refund the take on error
+      setGenerationResults([]); // Clear the results on error
     }
   }, [takes, setTakes, userPhotos]);
   
@@ -153,11 +164,9 @@ export default function App() {
           </div>
         );
       case 'results':
-        const originalPhotos = [userPhotos.front, userPhotos.side, userPhotos.back].filter(Boolean) as string[];
         return (
           <ResultsScreen
-            originalPhotos={originalPhotos}
-            generatedImages={generatedImages}
+            results={generationResults}
             onFinish={handleFinish}
             onDescribeNewStyle={handleDescribeNewStyle}
           />

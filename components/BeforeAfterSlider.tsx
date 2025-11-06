@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback } from 'react';
 
 interface BeforeAfterSliderProps {
@@ -47,12 +46,12 @@ const BeforeAfterSlider: React.FC<BeforeAfterSliderProps> = ({ before, after }) 
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
     >
-      <img src={before} alt="Before" className="absolute top-0 left-0 w-full h-full object-contain" />
+      <img src={before} alt="Before" className="absolute top-0 left-0 w-full h-full object-cover" />
       <div
         className="absolute top-0 left-0 w-full h-full overflow-hidden"
         style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
       >
-        <img src={after} alt="After" className="absolute top-0 left-0 w-full h-full object-contain" />
+        <img src={after} alt="After" className="absolute top-0 left-0 w-full h-full object-cover" />
       </div>
       <div
         className="absolute top-0 bottom-0 w-1 bg-white/50 cursor-ew-resize"
