@@ -34,8 +34,7 @@ export async function suggestStyle(photoBase64: string): Promise<string> {
 export async function generateHairstyle(
     photo: string, 
     view: 'front' | 'side' | 'back', 
-    styleInput: StyleInput, 
-    contextPhotos: { front?: string; side?: string } = {}
+    styleInput: StyleInput
 ): Promise<string> {
     const parts = [];
     
@@ -54,16 +53,6 @@ export async function generateHairstyle(
         parts.push({ text: "Invent a new, fashionable hairstyle for the person."});
     }
 
-    // Provide context from previous generations for consistency
-    if (contextPhotos.front) {
-        parts.push({ text: "IMPORTANT CONTEXT: This is the front view of the hairstyle you are creating. The new image must have the EXACT same hair style, color, and length." });
-        parts.push(base64ToPart(contextPhotos.front, 'image/jpeg'));
-    }
-    if (contextPhotos.side) {
-        parts.push({ text: "IMPORTANT CONTEXT: This is the side view of the hairstyle you are creating. The new image must have the EXACT same hair style, color, and length." });
-        parts.push(base64ToPart(contextPhotos.side, 'image/jpeg'));
-    }
-
     // Final instruction with the original photo
     const viewInstructions = {
         front: 'You will be transforming a front-facing portrait.',
@@ -71,10 +60,23 @@ export async function generateHairstyle(
         back: 'You will be transforming a photo of the back of the head.',
     };
 
-    const finalInstruction = `
-CRITICAL FINAL INSTRUCTION: Your final and most important task is to apply the new hairstyle to the person in the *very next image* provided.
-You MUST preserve the person's identity, the background, and critically, the exact head pose and camera angle from this final image. Do not change the perspective. The change from the original hair should be significant and clear.
+    let finalInstruction = `
+CRITICAL FINAL INSTRUCTION - TARGET IMAGE: The image provided immediately after this instruction is the TARGET image.
+Your task is to take the hairstyle defined by the style description and apply it to the person in this TARGET image.
+You MUST follow these rules for the final output:
+1.  **PRESERVE IDENTITY & POSE**: The person in your output image, including their head pose, camera angle, and perspective, MUST be identical to the person in the TARGET image.
+2.  **PRESERVE BACKGROUND**: The background MUST be identical to the TARGET image.
+3.  **CHANGE ONLY THE HAIR**: The only change should be replacing the original hair with the new hairstyle.
+4.  **MATCH THE VIEW**: The output MUST be a '${view}' view, exactly matching the TARGET image's perspective. Do not show the person's face if it's not visible in the TARGET image.
     `;
+    
+    // Add a more forceful instruction for the back view to prevent face generation
+    if (view === 'back') {
+        finalInstruction = `
+SPECIAL INSTRUCTION FOR BACK VIEW: The TARGET image is of the back of a person's head. The final output MUST be a view from the back, showing no face. 
+${finalInstruction}
+        `;
+    }
 
     parts.push({ text: `${viewInstructions[view]} ${finalInstruction}` });
     parts.push(base64ToPart(photo, 'image/jpeg'));

@@ -1,17 +1,54 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import BeforeAfterSlider from './BeforeAfterSlider';
 import ChevronLeftIcon from './icons/ChevronLeftIcon';
 import ChevronRightIcon from './icons/ChevronRightIcon';
 import SaveIcon from './icons/SaveIcon';
+import Spinner from './Spinner';
+import type { GenerationResult } from '../types';
 
 interface ResultsScreenProps {
-  results: { original: string; generated: string }[];
+  results: GenerationResult[];
   onFinish: () => void;
   onDescribeNewStyle: () => void;
 }
 
 const ResultsScreen: React.FC<ResultsScreenProps> = ({ results, onFinish, onDescribeNewStyle }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [aspectRatios, setAspectRatios] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!results || results.length === 0) {
+      setIsLoading(false);
+      return;
+    }
+
+    const originals = results.map(r => r.original);
+
+    const calculateRatios = async () => {
+      try {
+        const ratios = await Promise.all(
+          originals.map(originalPhoto => 
+            new Promise<string>((resolve, reject) => {
+              const img = new Image();
+              img.onload = () => resolve(`${img.width} / ${img.height}`);
+              img.onerror = (err) => reject(err);
+              img.src = originalPhoto;
+            })
+          )
+        );
+        setAspectRatios(ratios);
+      } catch (error) {
+        console.error("Failed to calculate image aspect ratios:", error);
+        setAspectRatios(originals.map(() => '3 / 4'));
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    calculateRatios();
+  }, [results]);
 
   const goToPrevious = () => {
     const isFirstSlide = currentIndex === 0;
@@ -35,6 +72,21 @@ const ResultsScreen: React.FC<ResultsScreenProps> = ({ results, onFinish, onDesc
     document.body.removeChild(link);
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-gray-900">
+        <Spinner />
+        <p className="mt-4 text-lg text-gray-300">Preparing your results...</p>
+      </div>
+    );
+  }
+
+  const containerStyle = {
+    aspectRatio: aspectRatios[currentIndex] || '3 / 4',
+  };
+
+  const currentResult = results[currentIndex];
+
   return (
     <div className="flex flex-col h-full bg-gray-900 text-white">
       <header className="p-4 text-center">
@@ -53,10 +105,10 @@ const ResultsScreen: React.FC<ResultsScreenProps> = ({ results, onFinish, onDesc
           </>
         )}
         
-        <div className="w-full h-full flex items-center justify-center">
-            <div className="w-full max-w-lg aspect-[3/4] relative">
-                {results[currentIndex] &&
-                    <BeforeAfterSlider key={currentIndex} before={results[currentIndex].original} after={results[currentIndex].generated} />
+        <div className="w-full h-full flex items-center justify-center p-2">
+            <div className="w-full max-w-lg relative" style={containerStyle}>
+                {currentResult &&
+                    <BeforeAfterSlider key={currentIndex} before={currentResult.original} after={currentResult.generated} />
                 }
                 <button onClick={handleSave} className="absolute top-2 right-2 z-10 p-2 bg-black/30 text-white rounded-full hover:bg-black/50" title="Save Photo">
                     <SaveIcon />

@@ -7,7 +7,7 @@ import Spinner from './components/Spinner';
 import DocsViewer from './components/DocsViewer';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { generateHairstyle, suggestStyle, validatePhoto } from './services/geminiService';
-import type { AppScreen, UserPhotos, StyleInput } from './types';
+import type { AppScreen, UserPhotos, StyleInput, GenerationResult } from './types';
 import { MimeType } from './types';
 import { INITIAL_TAKES } from './constants';
 
@@ -17,7 +17,7 @@ export default function App() {
   const [screen, setScreen] = useState<AppScreen>('welcome');
   const [takes, setTakes] = useLocalStorage<number>('takes', INITIAL_TAKES);
   const [userPhotos, setUserPhotos] = useState<UserPhotos>({ front: null, side: null, back: null });
-  const [generationResults, setGenerationResults] = useState<{ original: string, generated: string }[]>([]);
+  const [generationResults, setGenerationResults] = useState<GenerationResult[]>([]);
   const [styleInput, setStyleInput] = useState<StyleInput>({ text: '', image: null });
   const [error, setError] = useState<string | null>(null);
   const [isDocsVisible, setIsDocsVisible] = useState(false);
@@ -64,30 +64,35 @@ export default function App() {
     if (userPhotos.side) photosToProcess.push({ view: 'side', photo: userPhotos.side });
     if (userPhotos.back) photosToProcess.push({ view: 'back', photo: userPhotos.back });
     
+    const originalPhotosForGeneration = photosToProcess.map(p => p.photo);
+
     try {
-      // Sequential generation process to ensure consistency
+      // Sequential generation process, but now without passing context between steps.
       const generationProcess = async () => {
-        const results: { original: string, generated: string }[] = [];
-        const context: { front?: string; side?: string; } = {};
+        const generatedImages: string[] = [];
         for (const p of photosToProcess) {
-            const image = await generateHairstyle(p.photo, p.view, input, context);
-            results.push({ original: p.photo, generated: image });
-            if (p.view === 'front') context.front = image;
-            if (p.view === 'side') context.side = image;
+            // The 'context' object is no longer passed, ensuring each generation is independent.
+            const image = await generateHairstyle(p.photo, p.view, input);
+            generatedImages.push(image);
         }
-        return results;
+        return generatedImages;
       };
 
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('timeout')), GENERATION_TIMEOUT_MS)
       );
 
-      const results = await Promise.race([
+      const generatedImages = await Promise.race([
         generationProcess(),
         timeoutPromise
-      ]) as { original: string, generated: string }[];
+      ]) as string[];
       
-      setGenerationResults(results);
+      const pairedResults = originalPhotosForGeneration.map((original, index) => ({
+        original: original,
+        generated: generatedImages[index],
+      }));
+
+      setGenerationResults(pairedResults);
       setScreen('results');
     } catch (e: any) {
       console.error(e);
@@ -96,7 +101,15 @@ export default function App() {
       } else if (e.message === 'SAFETY_VIOLATION') {
         setError('Your description or reference photo might violate our content policy. Please modify your request and try again.');
       } else {
-        setError('An error occurred generating your preview. Please try rephrasing your description or using a different reference photo.');
+        let errorMessage = 'An error occurred generating your preview. ';
+        if (input.text && !input.image) {
+            errorMessage += 'Please try rephrasing your description.';
+        } else if (!input.text && input.image) {
+            errorMessage += 'Please try using a different reference photo or adding a clarifying text description.';
+        } else {
+            errorMessage += 'Please try rephrasing your description or using a different reference photo.';
+        }
+        setError(errorMessage);
       }
       setScreen('describe'); // Go back to the describe screen on error
       setTakes(prev => prev + 1); // Refund the take on error

@@ -1,9 +1,70 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import BackArrowIcon from './icons/BackArrowIcon';
 import CloseIcon from './icons/CloseIcon';
+import MicIcon from './icons/MicIcon';
 import { MimeType, StyleInput } from '../types';
 import Spinner from './Spinner';
 import { validateStyleImage } from '../services/geminiService';
+
+// FIX: Add types for the Web Speech API to resolve TypeScript errors.
+// These interfaces are not part of the standard DOM typings.
+interface SpeechRecognitionEvent extends Event {
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  readonly isFinal: boolean;
+  readonly length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  readonly transcript: string;
+  readonly confidence: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  readonly error: string;
+  readonly message: string;
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onstart: () => void;
+  onend: () => void;
+  onerror: (event: SpeechRecognitionErrorEvent) => void;
+  start(): void;
+  stop(): void;
+}
+
+declare var SpeechRecognition: {
+  prototype: SpeechRecognition;
+  new(): SpeechRecognition;
+};
+
+declare var webkitSpeechRecognition: {
+  prototype: SpeechRecognition;
+  new(): SpeechRecognition;
+};
+
+// FIX: Correctly augment the global Window interface from within a module.
+declare global {
+  interface Window {
+    SpeechRecognition?: typeof SpeechRecognition;
+    webkitSpeechRecognition?: typeof webkitSpeechRecognition;
+  }
+}
 
 interface DescribeStyleScreenProps {
   onGenerate: (style: StyleInput) => void;
@@ -13,38 +74,82 @@ interface DescribeStyleScreenProps {
   error: string | null;
 }
 
+const MIN_TEXT_LENGTH = 8;
+
 const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, onSuggest, onBack, takes, error }) => {
   const [text, setText] = useState('');
   const [image, setImage] = useState<{ base64: string; mimeType: MimeType } | null>(null);
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   const [isImageValidating, setIsImageValidating] = useState(false);
   const [imageValidationError, setImageValidationError] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
   
-  // FIX: Refactored image upload handler to correctly manage async operations and fix variable scope issue.
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
+  const isSpeechSupported = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+  
+  const handleToggleListening = () => {
+    if (isListening) {
+      speechRecognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) {
+      alert("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognitionAPI();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    speechRecognitionRef.current = recognition;
+
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        }
+      }
+      if (finalTranscript) {
+        setText(prev => (prev ? prev + ' ' : '') + finalTranscript.trim());
+      }
+    };
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => {
+        setIsListening(false);
+        speechRecognitionRef.current = null;
+    };
+    recognition.onerror = (event) => {
+        console.error('Speech recognition error', event.error);
+        setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Reset state for new upload
     setImage(null);
     setImageValidationError(null);
     setIsImageValidating(true);
 
     try {
       const mimeType = file.type as MimeType;
-
       if (!Object.values(MimeType).includes(mimeType)) {
         setImageValidationError('Unsupported file type. Please use PNG, JPEG, or WEBP.');
         return;
       }
-
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
         reader.onerror = (error) => reject(error);
         reader.readAsDataURL(file);
       });
-
       const validation = await validateStyleImage(base64);
       if (validation.isValid) {
         setImage({ base64, mimeType });
@@ -62,11 +167,8 @@ const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, o
   const handleRemoveImage = () => {
     setImage(null);
     setImageValidationError(null);
-    // Also reset the file input
     const input = document.getElementById('style-photo-upload') as HTMLInputElement;
-    if (input) {
-      input.value = '';
-    }
+    if (input) input.value = '';
   };
   
   const handleSuggest = async () => {
@@ -80,7 +182,8 @@ const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, o
     onGenerate({ text, image });
   };
 
-  const canGenerate = (!text && !image) || takes <= 0 || isImageValidating || !!imageValidationError;
+  const isTextPresentButInvalid = text.trim().length > 0 && text.trim().length < MIN_TEXT_LENGTH;
+  const canGenerate = (!text.trim() && !image) || takes <= 0 || isImageValidating || !!imageValidationError || isTextPresentButInvalid;
 
   return (
     <div className="flex flex-col h-full bg-gray-900 p-4">
@@ -98,10 +201,24 @@ const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, o
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="e.g., 'a short pixie cut, platinum blonde' or let us suggest a style for you!"
-            className="w-full h-32 p-4 bg-gray-800 text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none resize-none"
+            placeholder="e.g., 'a short pixie cut, platinum blonde'. Please be descriptive for best results!"
+            className="w-full h-32 p-4 pr-14 bg-gray-800 text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none resize-none"
           />
+           {isSpeechSupported && (
+            <button 
+                onClick={handleToggleListening}
+                className={`absolute bottom-3 right-3 p-2 rounded-full transition-colors ${isListening ? 'bg-red-500 animate-pulse' : 'bg-purple-600 hover:bg-purple-700'} text-white`}
+                aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+            >
+                <MicIcon />
+            </button>
+        )}
         </div>
+        {isTextPresentButInvalid && (
+          <p className="text-yellow-500 text-sm text-center -mt-2 mb-2">
+            Please provide a more detailed description (at least {MIN_TEXT_LENGTH} characters).
+          </p>
+        )}
         
         <div className="text-center my-2 text-gray-400">OR</div>
 

@@ -15,6 +15,11 @@ export interface StyleInput {
   } | null;
 }
 
+export interface GenerationResult {
+  original: string;
+  generated: string;
+}
+
 export enum MimeType {
     PNG = 'image/png',
     JPEG = 'image/jpeg',
