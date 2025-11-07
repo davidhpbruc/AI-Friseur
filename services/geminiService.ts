@@ -16,7 +16,7 @@ function base64ToPart(base64: string, mimeType: string) {
 }
 
 export async function suggestStyle(photoBase64: string): Promise<string> {
-    const prompt = `Analyze the facial features, face shape, and hair type of the person in this image. Suggest a flattering and stylish hairstyle for them. Describe the hairstyle in a concise sentence, for example, 'a textured bob with curtain bangs' or 'a classic crew cut with a high fade'. The description should be suitable for use in another AI image generation prompt. Be direct and provide only the hairstyle description.`;
+    const prompt = `Based on the person's facial features and face shape in the photo, suggest a single, highly flattering hairstyle. Your description should be detailed, clear, and ready to be used as a high-quality prompt for an AI image generator. For example: "A soft, layered lob cut with warm honey-blonde highlights and gentle, face-framing waves." Do not add any conversational text, just the hairstyle description.`;
     
     const response = await ai.models.generateContent({
         model: textModel,
@@ -36,49 +36,31 @@ export async function generateHairstyle(
     view: 'front' | 'side' | 'back', 
     styleInput: StyleInput
 ): Promise<string> {
-    const parts = [];
-    
-    // Initial instruction
-    parts.push({ text: "You are an expert AI hairstylist. Your goal is to generate a hyper-realistic photo of a person with a new hairstyle." });
+    const parts: (string | { inlineData: { data: string; mimeType: string; }; } | { text: string; })[] = [];
 
-    // Define the new style from text or image
-    if (styleInput.text) {
-        parts.push({ text: `The requested new hairstyle is: "${styleInput.text}".` });
-    }
+    // A simpler, more direct prompt structure that is more robust.
+    let prompt = `Your task is to edit the target person's photo to give them a new hairstyle as described.
+
+**New Hairstyle:** "${styleInput.text}"
+
+**Strict Rules:**
+1.  **Preserve the person's identity.** Their face, expression, and pose must not change.
+2.  **Preserve the background.** The background must remain identical.
+3.  **Only change the hair.** Replace the original hair with the new style.
+4.  **Match the view.** The output must be a '${view}' view, exactly matching the target photo's perspective.
+`;
+
     if (styleInput.image) {
-        parts.push({ text: "Use this image as the reference for the new hairstyle:" });
+        // If there's a reference image, add it before the text prompt.
+        // This pattern (visual context first) is often effective.
         parts.push(base64ToPart(styleInput.image.base64, styleInput.image.mimeType));
-    }
-    if (!styleInput.text && !styleInput.image) {
-        parts.push({ text: "Invent a new, fashionable hairstyle for the person."});
+        prompt += `\nThe image provided before this text is a visual reference for the hairstyle. Use it as a guide for the cut, color, and texture, but DO NOT copy the person or background from it. The text description is the main instruction.`
     }
 
-    // Final instruction with the original photo
-    const viewInstructions = {
-        front: 'You will be transforming a front-facing portrait.',
-        side: 'You will be transforming an angled, three-quarter profile photo.',
-        back: 'You will be transforming a photo of the back of the head.',
-    };
-
-    let finalInstruction = `
-CRITICAL FINAL INSTRUCTION - TARGET IMAGE: The image provided immediately after this instruction is the TARGET image.
-Your task is to take the hairstyle defined by the style description and apply it to the person in this TARGET image.
-You MUST follow these rules for the final output:
-1.  **PRESERVE IDENTITY & POSE**: The person in your output image, including their head pose, camera angle, and perspective, MUST be identical to the person in the TARGET image.
-2.  **PRESERVE BACKGROUND**: The background MUST be identical to the TARGET image.
-3.  **CHANGE ONLY THE HAIR**: The only change should be replacing the original hair with the new hairstyle.
-4.  **MATCH THE VIEW**: The output MUST be a '${view}' view, exactly matching the TARGET image's perspective. Do not show the person's face if it's not visible in the TARGET image.
-    `;
+    // Add the consolidated text prompt.
+    parts.push({ text: prompt });
     
-    // Add a more forceful instruction for the back view to prevent face generation
-    if (view === 'back') {
-        finalInstruction = `
-SPECIAL INSTRUCTION FOR BACK VIEW: The TARGET image is of the back of a person's head. The final output MUST be a view from the back, showing no face. 
-${finalInstruction}
-        `;
-    }
-
-    parts.push({ text: `${viewInstructions[view]} ${finalInstruction}` });
+    // Add the user's photo (the target image) last.
     parts.push(base64ToPart(photo, 'image/jpeg'));
 
     try {
@@ -145,8 +127,8 @@ Analyze the provided photo.`;
             model: textModel,
             contents: {
                 parts: [
-                    base64ToPart(photoBase64, 'image/jpeg'),
-                    { text: prompt }
+                    { text: prompt },
+                    base64ToPart(photoBase64, 'image/jpeg')
                 ]
             },
             config: {
@@ -192,8 +174,8 @@ Return a JSON object with "isValid" (boolean) and "issue" (a brief, user-friendl
             model: textModel,
             contents: {
                 parts: [
-                    base64ToPart(photoBase64, 'image/jpeg'),
-                    { text: prompt }
+                    { text: prompt },
+                    base64ToPart(photoBase64, 'image/jpeg')
                 ]
             },
             config: {

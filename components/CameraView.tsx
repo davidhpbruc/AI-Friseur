@@ -1,5 +1,4 @@
-
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import FlipCameraIcon from './icons/FlipCameraIcon';
 import CameraIcon from './icons/CameraIcon';
 import FrontProfileIcon from './icons/FrontProfileIcon';
@@ -18,29 +17,33 @@ const CameraView: React.FC<CameraViewProps> = ({ onCapture, view }) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let currentStream: MediaStream | null = null;
+    let stream: MediaStream | null = null;
+    let isCancelled = false;
 
-    async function getCameraStream() {
-      try {
-        const newStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode },
-        });
-        currentStream = newStream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = newStream;
+    setError(null);
+
+    navigator.mediaDevices.getUserMedia({
+        video: { facingMode },
+    }).then(newStream => {
+        if (isCancelled) {
+            newStream.getTracks().forEach((track) => track.stop());
+            return;
         }
-        setError(null);
-      } catch (err) {
-        console.error("Error accessing camera:", err);
-        setError("Could not access the camera. Please check permissions.");
-      }
-    }
-
-    getCameraStream();
+        stream = newStream;
+        if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+        }
+    }).catch(err => {
+        if (!isCancelled) {
+            console.error("Error accessing camera:", err);
+            setError("Could not access the camera. Please check permissions.");
+        }
+    });
 
     return () => {
-      if (currentStream) {
-        currentStream.getTracks().forEach((track) => track.stop());
+      isCancelled = true;
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
       }
     };
   }, [facingMode]);

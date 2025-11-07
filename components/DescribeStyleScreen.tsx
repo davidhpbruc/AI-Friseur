@@ -1,70 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import BackArrowIcon from './icons/BackArrowIcon';
 import CloseIcon from './icons/CloseIcon';
-import MicIcon from './icons/MicIcon';
 import { MimeType, StyleInput } from '../types';
 import Spinner from './Spinner';
 import { validateStyleImage } from '../services/geminiService';
-
-// FIX: Add types for the Web Speech API to resolve TypeScript errors.
-// These interfaces are not part of the standard DOM typings.
-interface SpeechRecognitionEvent extends Event {
-  readonly resultIndex: number;
-  readonly results: SpeechRecognitionResultList;
-}
-
-interface SpeechRecognitionResultList {
-  readonly length: number;
-  item(index: number): SpeechRecognitionResult;
-  [index: number]: SpeechRecognitionResult;
-}
-
-interface SpeechRecognitionResult {
-  readonly isFinal: boolean;
-  readonly length: number;
-  item(index: number): SpeechRecognitionAlternative;
-  [index: number]: SpeechRecognitionAlternative;
-}
-
-interface SpeechRecognitionAlternative {
-  readonly transcript: string;
-  readonly confidence: number;
-}
-
-interface SpeechRecognitionErrorEvent extends Event {
-  readonly error: string;
-  readonly message: string;
-}
-
-interface SpeechRecognition extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: (event: SpeechRecognitionEvent) => void;
-  onstart: () => void;
-  onend: () => void;
-  onerror: (event: SpeechRecognitionErrorEvent) => void;
-  start(): void;
-  stop(): void;
-}
-
-declare var SpeechRecognition: {
-  prototype: SpeechRecognition;
-  new(): SpeechRecognition;
-};
-
-declare var webkitSpeechRecognition: {
-  prototype: SpeechRecognition;
-  new(): SpeechRecognition;
-};
-
-// FIX: Correctly augment the global Window interface from within a module.
-declare global {
-  interface Window {
-    SpeechRecognition?: typeof SpeechRecognition;
-    webkitSpeechRecognition?: typeof webkitSpeechRecognition;
-  }
-}
 
 interface DescribeStyleScreenProps {
   onGenerate: (style: StyleInput) => void;
@@ -72,63 +11,17 @@ interface DescribeStyleScreenProps {
   onBack: () => void;
   takes: number;
   error: string | null;
+  initialStyleInput: StyleInput;
 }
 
-const MIN_TEXT_LENGTH = 8;
+const MIN_TEXT_WORDS = 5;
 
-const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, onSuggest, onBack, takes, error }) => {
-  const [text, setText] = useState('');
-  const [image, setImage] = useState<{ base64: string; mimeType: MimeType } | null>(null);
+const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, onSuggest, onBack, takes, error, initialStyleInput }) => {
+  const [text, setText] = useState(initialStyleInput.text || '');
+  const [image, setImage] = useState(initialStyleInput.image || null);
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   const [isImageValidating, setIsImageValidating] = useState(false);
   const [imageValidationError, setImageValidationError] = useState<string | null>(null);
-  const [isListening, setIsListening] = useState(false);
-  
-  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
-  const isSpeechSupported = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
-  
-  const handleToggleListening = () => {
-    if (isListening) {
-      speechRecognitionRef.current?.stop();
-      return;
-    }
-
-    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognitionAPI) {
-      alert("Speech recognition is not supported in this browser.");
-      return;
-    }
-
-    const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    speechRecognitionRef.current = recognition;
-
-    recognition.onresult = (event) => {
-      let finalTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        }
-      }
-      if (finalTranscript) {
-        setText(prev => (prev ? prev + ' ' : '') + finalTranscript.trim());
-      }
-    };
-
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => {
-        setIsListening(false);
-        speechRecognitionRef.current = null;
-    };
-    recognition.onerror = (event) => {
-        console.error('Speech recognition error', event.error);
-        setIsListening(false);
-    };
-
-    recognition.start();
-  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -181,9 +74,17 @@ const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, o
   const handleGenerate = () => {
     onGenerate({ text, image });
   };
+  
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  const isTextInvalid = wordCount < MIN_TEXT_WORDS;
+  
+  const isGenerateDisabled = 
+    isTextInvalid || 
+    takes <= 0 || 
+    isImageValidating || 
+    !!imageValidationError;
 
-  const isTextPresentButInvalid = text.trim().length > 0 && text.trim().length < MIN_TEXT_LENGTH;
-  const canGenerate = (!text.trim() && !image) || takes <= 0 || isImageValidating || !!imageValidationError || isTextPresentButInvalid;
+  const isTextPresentButInvalid = text.trim().length > 0 && isTextInvalid;
 
   return (
     <div className="flex flex-col h-full bg-gray-900 p-4">
@@ -195,36 +96,25 @@ const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, o
       </header>
 
       <main className="flex-grow flex flex-col justify-center mt-4">
-        {error && <p className="bg-red-500/20 text-red-300 p-3 rounded-lg mb-4 text-center">{error}</p>}
+        {error && <p className="bg-red-500/20 text-red-300 p-3 rounded-lg mb-4 text-left whitespace-pre-wrap">{error}</p>}
         
         <div className="relative mb-4">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="e.g., 'a short pixie cut, platinum blonde'. Please be descriptive for best results!"
-            className="w-full h-32 p-4 pr-14 bg-gray-800 text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none resize-none"
+            placeholder={`e.g., 'a short pixie cut, platinum blonde'.\nYour description is required (min. ${MIN_TEXT_WORDS} words).`}
+            className="w-full h-32 p-4 bg-gray-800 text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none resize-none"
           />
-           {isSpeechSupported && (
-            <button 
-                onClick={handleToggleListening}
-                className={`absolute bottom-3 right-3 p-2 rounded-full transition-colors ${isListening ? 'bg-red-500 animate-pulse' : 'bg-purple-600 hover:bg-purple-700'} text-white`}
-                aria-label={isListening ? 'Stop listening' : 'Start voice input'}
-            >
-                <MicIcon />
-            </button>
-        )}
         </div>
         {isTextPresentButInvalid && (
           <p className="text-yellow-500 text-sm text-center -mt-2 mb-2">
-            Please provide a more detailed description (at least {MIN_TEXT_LENGTH} characters).
+            Please provide a more detailed description (at least {MIN_TEXT_WORDS} words).
           </p>
         )}
         
-        <div className="text-center my-2 text-gray-400">OR</div>
-
-        <div className="flex flex-col items-center">
+        <div className="flex flex-col items-center mb-4">
           <label className="w-full px-4 py-3 bg-gray-800 text-center rounded-lg cursor-pointer hover:bg-gray-700">
-            <span className="text-purple-400 font-semibold">Upload Style Photo</span>
+            <span className="text-purple-400 font-semibold">Upload Style Photo (Optional)</span>
             <input id="style-photo-upload" type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
           </label>
           {isImageValidating && (
@@ -249,8 +139,6 @@ const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, o
             <p className="text-red-400 text-sm mt-2 text-center">{imageValidationError}</p>
           )}
         </div>
-        
-        <div className="text-center my-2 text-gray-400">OR</div>
 
         <button onClick={handleSuggest} disabled={isLoadingSuggestion} className="w-full px-4 py-3 bg-gray-800 text-center rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait">
           {isLoadingSuggestion ? <Spinner small /> : <span className="text-purple-400 font-semibold">Suggest a Style For Me</span>}
@@ -261,7 +149,7 @@ const DescribeStyleScreen: React.FC<DescribeStyleScreenProps> = ({ onGenerate, o
          <p className="text-center text-gray-400 mb-2">Previews Remaining: <span className="font-bold text-white">{takes}</span></p>
         <button
           onClick={handleGenerate}
-          disabled={canGenerate}
+          disabled={isGenerateDisabled}
           className="w-full py-4 bg-purple-600 text-white font-bold rounded-full disabled:bg-gray-600 disabled:cursor-not-allowed hover:bg-purple-700"
         >
           Generate New Look

@@ -67,11 +67,9 @@ export default function App() {
     const originalPhotosForGeneration = photosToProcess.map(p => p.photo);
 
     try {
-      // Sequential generation process, but now without passing context between steps.
       const generationProcess = async () => {
         const generatedImages: string[] = [];
         for (const p of photosToProcess) {
-            // The 'context' object is no longer passed, ensuring each generation is independent.
             const image = await generateHairstyle(p.photo, p.view, input);
             generatedImages.push(image);
         }
@@ -96,24 +94,33 @@ export default function App() {
       setScreen('results');
     } catch (e: any) {
       console.error(e);
-       if (e.message === 'timeout') {
+      // Common state updates for any error
+      setScreen('describe');
+      setTakes(prev => prev + 1); // Refund the take
+      setGenerationResults([]);
+
+      if (e.message === 'timeout') {
         setError('The request timed out as the AI is taking too long. Please try again later.');
       } else if (e.message === 'SAFETY_VIOLATION') {
         setError('Your description or reference photo might violate our content policy. Please modify your request and try again.');
       } else {
-        let errorMessage = 'An error occurred generating your preview. ';
-        if (input.text && !input.image) {
-            errorMessage += 'Please try rephrasing your description.';
-        } else if (!input.text && input.image) {
-            errorMessage += 'Please try using a different reference photo or adding a clarifying text description.';
-        } else {
-            errorMessage += 'Please try rephrasing your description or using a different reference photo.';
+        // Focused error message logic
+        let errorMessage = "The AI couldn't create a look from your request.\nThis usually happens if the description is too abstract or the reference photo is unclear.\n";
+        const suggestions = [];
+
+        if (input.text) {
+            suggestions.push("Try rephrasing your description to be more specific (e.g., 'long wavy brown hair with blonde highlights').");
         }
+        if (input.image) {
+            suggestions.push("Try using a different reference photo where the hairstyle is very clear.");
+        }
+        
+        if (suggestions.length > 0) {
+            errorMessage += "\n**Suggestions:**\n" + suggestions.map(s => `• ${s}`).join('\n');
+        }
+        
         setError(errorMessage);
       }
-      setScreen('describe'); // Go back to the describe screen on error
-      setTakes(prev => prev + 1); // Refund the take on error
-      setGenerationResults([]); // Clear the results on error
     }
   }, [takes, setTakes, userPhotos]);
   
@@ -143,13 +150,19 @@ export default function App() {
     if (screen === 'photo-side') setScreen('photo-front');
     else if (screen === 'photo-back') setScreen('photo-side');
     else if (screen === 'describe') setScreen('photo-back');
-    else if (screen === 'results') setScreen('describe');
+    else if (screen === 'results') {
+      setError(null); // Clear any previous generation errors when going back.
+      setScreen('describe');
+    }
     else setScreen('welcome');
   };
 
   const handleFinish = () => setScreen('welcome');
   
-  const handleDescribeNewStyle = () => setScreen('describe');
+  const handleDescribeNewStyle = () => {
+    setError(null); // Clear previous errors when trying a new style.
+    setScreen('describe');
+  };
 
   const addTakes = () => {
     setTakes(prev => prev + 5);
@@ -167,7 +180,7 @@ export default function App() {
       case 'photo-back':
         return <PhotoCaptureStep key="photo-back" view="back" onConfirm={(p) => handlePhotoConfirm(p, 'back')} onSkip={() => handleSkip('back')} onBack={goBack} previousPhoto={userPhotos.side} onValidate={handleValidatePhoto} />;
       case 'describe':
-        return <DescribeStyleScreen onGenerate={handleGenerate} onSuggest={handleSuggest} onBack={goBack} takes={takes} error={error} />;
+        return <DescribeStyleScreen onGenerate={handleGenerate} onSuggest={handleSuggest} onBack={goBack} takes={takes} error={error} initialStyleInput={styleInput} />;
       case 'generating':
         return (
           <div className="flex flex-col items-center justify-center h-screen bg-gray-900 p-4">

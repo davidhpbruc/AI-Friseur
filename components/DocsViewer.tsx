@@ -87,7 +87,7 @@ The MVP is focused on delivering the core value proposition: generating a high-q
 -   **✅ AI-Powered Photo Validation**: Each photo is analyzed in real-time for common issues (blur, lighting, angle), with clear feedback provided to the user.
 -   **✅ Multi-Modal Style Input**: Users can describe a style using:
     -   Text input
-    -   Voice dictation (Speech-to-Text)
+    -   Voice dictation (Temporarily disabled)
     -   An uploaded reference photo
     -   An AI-powered suggestion based on their photo.
 -   **✅ Angle-Aware AI Generation**: The AI receives specific instructions for each view (front, side, back) to ensure the hairstyle is rendered correctly from every perspective.
@@ -162,7 +162,6 @@ This document details the step-by-step journey a user takes through the AI Frise
 -   **Action**: The user is ready to specify their desired hairstyle.
 -   **UI**: The screen provides multiple input methods:
     -   A text area for typing a description.
-    -   A microphone button for voice input.
     -   An "Upload Style Photo" button for a visual reference.
     -   A "Suggest a Style For Me" button that triggers an AI suggestion.
 -   **Outcome**: After providing input, the user clicks "Generate My Preview (Uses 1 Take)".

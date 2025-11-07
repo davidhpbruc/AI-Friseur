@@ -1,5 +1,4 @@
-
-export const INITIAL_TAKES = 3;
+export const INITIAL_TAKES = 50;
 
 export const HAIR_COLORS = [
     { name: 'Blonde', value: '#d4af37' },
